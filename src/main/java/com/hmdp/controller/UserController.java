@@ -46,7 +46,10 @@ public class UserController {
     /**
      * 登录功能
      * @param loginForm 登录参数，包含手机号、验证码；或者手机号、密码
+     * @RequsetBody ：@RequestBody 是 Spring 框架中的一个注解，
+     * 常用于 处理 HTTP 请求的请求体（body），将客户端发送的请求数据自动转换成 Java 对象。
      */
+
     @PostMapping("/login")
     public Result login(@RequestBody LoginFormDTO loginForm, HttpSession session){
         // TODO 实现登录功能

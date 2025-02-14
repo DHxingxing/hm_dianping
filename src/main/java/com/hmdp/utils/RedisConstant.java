@@ -5,4 +5,7 @@ public class RedisConstant {
     public static final Long LOGIN_CODE_TTL = 2L;
     public static final String LOGIN_TOKEN = "login:token:";
     public static final Long LOGIN_TOKEN_TTL = 30L;
+
+    public static final String CACHE_SHOP_KEY = "cache:shop:";
+    public static final String CACHE_TYPE_KEY = "cache:type:";
 }

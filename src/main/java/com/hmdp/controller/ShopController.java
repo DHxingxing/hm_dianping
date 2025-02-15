@@ -34,7 +34,9 @@ public class ShopController {
     @GetMapping("/{id}")
     public Result queryShopById(@PathVariable("id") Long id) {
         return shopService.queryByID(id);
+//        return shopService.QueryWithLogicExpire(id);
     }
+
 
     /**
      * 新增商铺信息
@@ -57,8 +59,7 @@ public class ShopController {
     @PutMapping
     public Result updateShop(@RequestBody Shop shop) {
         // 写入数据库
-        shopService.updateById(shop);
-        return Result.ok();
+        return shopService.update(shop);
     }
 
     /**

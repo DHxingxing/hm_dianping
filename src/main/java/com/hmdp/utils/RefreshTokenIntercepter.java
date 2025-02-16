@@ -44,6 +44,7 @@ public class RefreshTokenIntercepter implements HandlerInterceptor {
         }
         // 将从redis 中查询到的hash 数据转为 userdto对象
         UserDTO userDTO = BeanUtil.fillBeanWithMap(userMap, new UserDTO(), false);
+
         // 存在，保存用户到Threadlocal
         UserHolder.saveUser((UserDTO) userDTO);
         // 刷新token有效期

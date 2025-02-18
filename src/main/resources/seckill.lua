@@ -8,8 +8,8 @@ local userID = ARGV[2];
 local stockKey = "secKill:stock:" .. voucherID;
 local orderKey = "secKill:order:" .. voucherID;
 
-if tonumber(redis.call('get', stockKey) <= 0) then
-    return 1
+if tonumber(redis.call('get', stockKey)) <= 0 then
+    return 1 -- 库存不足
 end
 
 --- 用户是否下过单
@@ -23,3 +23,5 @@ end
 redis.call('incrby', stockKey, -1)
 
 redis.call('sadd', orderKey, userID)
+
+return 0

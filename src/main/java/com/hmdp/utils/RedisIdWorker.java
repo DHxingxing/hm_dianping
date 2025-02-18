@@ -17,6 +17,8 @@ public class RedisIdWorker {
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
+
+    // 用于生成订单id
     public long nextID(String prefixKey){
         // 生成时间戳
 

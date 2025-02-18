@@ -14,6 +14,9 @@ public class RedisConstant {
 
     public static final String CACHE_TYPE_KEY = "cache:type:";
     public static final String SECKILL_STOCK_KEY = "secKill:stock:";
+    public static final String SECKILL_ORDER_ID = "secKill:Order:";
+
+
 
 
 }

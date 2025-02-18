@@ -73,6 +73,12 @@
             <artifactId>aspectjweaver</artifactId>
             <version>1.9.7</version>  <!-- 使用合适的版本 -->
         </dependency>
+
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>3.22.0</version>
+        </dependency>
     </dependencies>
 
     <build>

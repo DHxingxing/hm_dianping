@@ -8,8 +8,11 @@ import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.utils.RedisConifg;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
+import org.redisson.api.RLock;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -18,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.concurrent.TimeUnit;
 
 /**
  * <p>
@@ -38,11 +42,20 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private ISeckillVoucherService iSeckillVoucherService;
+
     @Autowired
     private VoucherController voucherController;
 
+    @Resource
+    private RedisConifg redisConifg;
+
     @Override
     public Result seckillOrder(Long voucherId) {
+
+        // 执行lua 脚本
+        
+
+
 
         SeckillVoucher voucher = iSeckillVoucherService.getById(voucherId);
         if (voucher.getBeginTime().isAfter(LocalDateTime.now())) {
@@ -57,12 +70,80 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
 
         Long userId = UserHolder.getUser().getId();
-        synchronized (userId.toString().intern()) {
-            IVoucherOrderService proxy =(IVoucherOrderService) AopContext.currentProxy();
-            return proxy.createVoucherOrder(voucherId, userId); // 同样的id 来的话 只能让一个人得到锁 其余相同的id的会被锁在外面不允许进来，防止黄牛
-        }
+//        synchronized (userId.toString().intern()) {
+//            IVoucherOrderService proxy =(IVoucherOrderService) AopContext.currentProxy();
+//            return proxy.createVoucherOrder(voucherId userId); // 同样的id 来的话 只能让一个人得到锁 其余相同的id的会被锁在外面不允许进来，防止黄牛
+//        }
 
+//        SimpleRedisLock simpleRedisLock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
+//        boolean isLock = simpleRedisLock.tryLock(1200L);
+//        simpleRedisLock.unlock();
+
+        RLock lock = redisConifg.redissonClient().getLock("redission:lock:order:" + userId); // 这里返回的是一个RedissonLock 类
+
+        boolean isLock = lock.tryLock();
+
+        if (!isLock) {
+            return Result.fail("只允许下一单");
+        }
+        try {
+            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
+            return proxy.createVoucherOrder(voucherId, userId); // 同样的id 来的话 只能让一个人得到锁 其余相同的id的会被锁在外面不允许进来，防止黄牛
+        } catch (IllegalStateException e) {
+            throw new RuntimeException(e);
+        } finally {
+
+//            simpleRedisLock.unlock();
+
+            lock.unlock();
+        }
     }
+
+//    @Override
+//    public Result seckillOrder(Long voucherId) {
+//
+//        SeckillVoucher voucher = iSeckillVoucherService.getById(voucherId);
+//        if (voucher.getBeginTime().isAfter(LocalDateTime.now())) {
+//            return Result.fail("秒杀尚未开始");
+//        }
+//        if (voucher.getEndTime().isBefore(LocalDateTime.now())) {
+//            return Result.fail("秒杀已经结束");
+//        }
+//
+//        if (voucher.getStock() < 1) {
+//            Result.fail("库存不足");
+//        }
+//
+//        Long userId = UserHolder.getUser().getId();
+////        synchronized (userId.toString().intern()) {
+////            IVoucherOrderService proxy =(IVoucherOrderService) AopContext.currentProxy();
+////            return proxy.createVoucherOrder(voucherId userId); // 同样的id 来的话 只能让一个人得到锁 其余相同的id的会被锁在外面不允许进来，防止黄牛
+////        }
+//
+////        SimpleRedisLock simpleRedisLock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
+////        boolean isLock = simpleRedisLock.tryLock(1200L);
+////        simpleRedisLock.unlock();
+//
+//        RLock lock = redisConifg.redissonClient().getLock("redission:lock:order:" + userId); // 这里返回的是一个RedissonLock 类
+//
+//        boolean isLock = lock.tryLock();
+//
+//        if (!isLock) {
+//            return Result.fail("只允许下一单");
+//        }
+//        try {
+//            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
+//            return proxy.createVoucherOrder(voucherId, userId); // 同样的id 来的话 只能让一个人得到锁 其余相同的id的会被锁在外面不允许进来，防止黄牛
+//        } catch (IllegalStateException e) {
+//            throw new RuntimeException(e);
+//        } finally {
+//
+////            simpleRedisLock.unlock();
+//
+//            lock.unlock();
+//        }
+//    }
+
 
     @Transactional
     public Result createVoucherOrder(Long voucherId, Long userId) {

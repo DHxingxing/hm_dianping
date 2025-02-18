@@ -36,6 +36,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     @Resource
     private ISeckillVoucherService iSeckillVoucherService;
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
 
     @Override
     public Result queryVoucherOfShop(Long shopId) {
@@ -58,6 +61,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         seckillVoucher.setBeginTime(voucher.getBeginTime());
         seckillVoucher.setEndTime(voucher.getEndTime());
         iSeckillVoucherService.save(seckillVoucher);
+
+        stringRedisTemplate.opsForValue().set("SECKILL_STOCK_KEY" + voucher.getId(),voucher.getStock().toString());
     }
 
 

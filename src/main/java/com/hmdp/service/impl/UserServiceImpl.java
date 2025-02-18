@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -103,6 +104,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         String token = UUID.randomUUID().toString(true);
         // 复制属性 user --> UserDTO.class
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+
         // userDTO 转为 usermap
         Map<String, Object> userMap = BeanUtil.beanToMap(userDTO);
         // 通过新建一个hashmap 将 原来的long类型转为string类型 ，但是提升了时间复杂度
@@ -134,4 +136,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         return user;
 
     }
+
+    /**
+     * 获取全部用户数据
+     * @return 用户列表
+     */
+    public List<User> getMysqlUsers() {
+        return this.list(); // 调用 MyBatis-Plus 的 list() 方法
+    }
+
+
 }

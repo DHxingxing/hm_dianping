@@ -13,7 +13,7 @@ public class RedisConstant {
     public static final String LOCK_SHOP_KEY = "lock:shop:";
 
     public static final String CACHE_TYPE_KEY = "cache:type:";
-
+    public static final String SECKILL_STOCK_KEY = "secKill:stock:";
 
 
 }

@@ -3,12 +3,16 @@
 local voucherID = ARGV[1];
 local userID = ARGV[2];
 
+local orderID = ARGV[3]
+
 --- 库存key
 
 local stockKey = "secKill:stock:" .. voucherID;
 local orderKey = "secKill:order:" .. voucherID;
 
-if tonumber(redis.call('get', stockKey)) <= 0 then
+
+
+if (tonumber(redis.call('get', stockKey)) <= 0) then
     return 1 -- 库存不足
 end
 
@@ -23,5 +27,10 @@ end
 redis.call('incrby', stockKey, -1)
 
 redis.call('sadd', orderKey, userID)
+
+-- 发送消息到队列之中
+local id = orderID
+
+redis.call('xadd', 'streams.orders', '*', 'userId', userID, 'voucherID', voucherID, 'ID', id)
 
 return 0

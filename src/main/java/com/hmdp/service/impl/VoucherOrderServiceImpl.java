@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.bean.BeanUtil;
 import com.hmdp.controller.VoucherController;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.VoucherOrder;
@@ -15,6 +16,7 @@ import org.redisson.api.RLock;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.connection.stream.*;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -23,7 +25,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
+import java.time.Duration;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 
 import static com.hmdp.utils.RedisConstant.SECKILL_ORDER_ID;
@@ -68,17 +73,76 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     }
 
     private class VoucherOrderHandler implements Runnable {
+        String queueName = "streams.orders";
 
         @Override
         public void run() {
             while (true) {
                 try {
-                    VoucherOrder voucherOrder = orderTasks.take(); // 检索并删除此队列的头部，必要时等待，直到元素可用为止。
+
+                    // 获取消息队列中的订单信息 XREADGROUP GROUP g1 c1 COUNT BLOCK 2000 STREAMS streams.order >
+                    List<MapRecord<String, Object, Object>> read = stringRedisTemplate.opsForStream().read(Consumer.from("g1", "c1")//消费者名称：每个消费者都可以在消费消息时指定自己的名字。
+                            , StreamReadOptions.empty().count(1).block(Duration.ofSeconds(2))
+                            , StreamOffset.create(queueName, ReadOffset.lastConsumed()));
+                    // 判断消息是否获取成功
+
+                    if(read == null || read.isEmpty()){
+                        // 如果获取失败说明没有信息，继续等待下一次循环
+                        continue;
+                    }
+
+                    // 如果获取成功 可以下单
+
+                    MapRecord<String, Object, Object> record = read.get(0);
+                    Map<Object, Object> values = record.getValue();
+                    VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(values, new VoucherOrder(), false);
                     handleVoucherOrder(voucherOrder);
-                } catch (InterruptedException e) {
-                    log.error("处理订单异常 " + e);
+
+                    // ACK 确认 *** SACK stream.orders g1 id (消息的id告诉他消除哪个id)
+                    stringRedisTemplate.opsForStream().acknowledge(queueName,"g1",record.getId());
+
+                } catch (Exception e) {
+                    handlePendingList();
+                    throw new RuntimeException(e);
                 }
             }
+        }
+
+        private void handlePendingList() {
+
+            while(true){
+
+                try {
+                    // 获取消息队列中的订单信息 XREADGROUP GROUP g1 c1 COUNT BLOCK 2000 STREAMS streams.order >
+                    List<MapRecord<String, Object, Object>> read = stringRedisTemplate.opsForStream().read(Consumer.from("g1", "c1")//消费者名称：每个消费者都可以在消费消息时指定自己的名字。
+                    , StreamReadOptions.empty().count(1)
+                    , StreamOffset.create(queueName, ReadOffset.from("0")));
+                    // 判断消息是否获取成功
+
+                    if(read == null || read.isEmpty()){
+                        // 如果获取失败说明没有pending list 没有信息，结束循环
+                        break;
+                    }
+
+                    // 如果获取成功 可以下单
+
+                    MapRecord<String, Object, Object> record = read.get(0);
+                    Map<Object, Object> values = record.getValue();
+                    VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(values, new VoucherOrder(), false);
+                    handleVoucherOrder(voucherOrder);
+
+                    // ACK 确认 *** SACK stream.orders g1 id (消息的id告诉他消除哪个id)
+                    stringRedisTemplate.opsForStream().acknowledge(queueName,"g1",record.getId());
+                } catch (Exception e) {
+                    log.error("处理订单错误：" + e);
+                    try {
+                        Thread.sleep(20);
+                    } catch (InterruptedException ex) {
+                        throw new RuntimeException(ex);
+                    }
+                }
+            }
+
         }
     }
 
@@ -119,35 +183,122 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Override
     public Result seckillOrder(Long voucherId) {
+
         Long userid = UserHolder.getUser().getId();
-        String userID = userid.toString();
+
+        Long orderid = redisIdWorker.nextID(SECKILL_ORDER_ID + voucherId);
+
         /*
-        在 Lua 脚本中返回的数字值（如 0 或 1）在 Java 中通常会被映射为 Long 类型。这是因为 Lua 中的数字默认是双精度浮点数（double），
+        在 Lua 脚本中返回的数字值（如 0 或 1）在 Java 中通常会被映射为 Long 类型。传入lua脚本的是字符串类型。这是因为 Lua 中的数字默认是双精度浮点数（double），
         但在 Java 中，尤其是通过一些常见的 Lua 与 Java 的桥接库（如 LuaJ），Lua 的数字值通常会被转换为 Long 类型。
          */
         // 执行lua 脚本
-        Long execute = stringRedisTemplate.execute(SECKILL_SCRIPT, Collections.emptyList(), voucherId.toString(), userID);
+        Long execute = stringRedisTemplate.execute(SECKILL_SCRIPT, Collections.emptyList(), voucherId.toString(), userid.toString(), orderid.toString());
+        // 脚本执行完 代表用户 有购买资格 ，同时 消息提交到了消息队列
+
         int r = execute.intValue();
         if (execute != 0) {
             System.out.println(execute == 1 ? "库存不足" : "不能重复下单");
             return Result.fail(execute == 1 ? "库存不足" : "不能重复下单");
         }
 
-        long orderID = redisIdWorker.nextID(SECKILL_ORDER_ID + voucherId);
-
-        // todo 保存阻塞队列
-        VoucherOrder voucherOrder = new VoucherOrder();
-        voucherOrder.setVoucherId(voucherId);
-        voucherOrder.setUserId(userid);
-        voucherOrder.setId(orderID);
-
-
-        orderTasks.add(voucherOrder); //  封装好订单信息后，放入阻塞队列
 
         proxy = (IVoucherOrderService) AopContext.currentProxy();
 
-        return Result.ok(orderID);
+        return Result.ok(orderid);
     }
+
+
+
+    @Transactional
+    public void createVoucherOrder(VoucherOrder voucherOrder) {
+        // 一人一单 // 这里还是会存在高并发存在的问题
+        Long voucherId = voucherOrder.getVoucherId();
+        Long userId = voucherOrder.getUserId();
+
+        Integer count = query().eq("user_id", userId).eq("voucher_id", voucherId).count();
+        /*
+        为什么 query() 查的是 VoucherOrder 表？
+        继承了 ServiceImpl：你的 VoucherOrderServiceImpl 类继承了 ServiceImpl<VoucherOrderMapper, VoucherOrder>，
+        其中 VoucherOrderMapper 是与 VoucherOrder 表进行映射的 MyBatis 映射器，VoucherOrder 是与数据库表 voucher_order 对应的实体类。
+        因此，当你在 VoucherOrderServiceImpl 中调用 query() 时，实际上是针对 voucher_order 表进行操作的。
+         */
+
+        // 扣减库存
+        boolean success = iSeckillVoucherService.update()
+                .setSql("stock = stock - 1")
+                .gt("stock", 0) // cas 乐观锁
+                .eq("voucher_id", voucherId).update();// eq == where 条件
+
+        if (!success) {
+            log.error("库存不足");
+        }
+
+        save(voucherOrder);
+
+
+
+
+        // 在这里的时候锁就释放了 其他线程就可以进入了 ，所以这里还是会存在 线程安全问题
+    }
+
+        /*
+        这是使用 阻塞队列实现的
+         */
+//    private class VoucherOrderHandler implements Runnable {
+//
+//        @Override
+//        public void run() {
+//            while (true) {
+//                try {
+//                    VoucherOrder voucherOrder = orderTasks.take(); // 检索并删除此队列的头部，必要时等待，直到元素可用为止。
+//                    handleVoucherOrder(voucherOrder);
+//                } catch (InterruptedException e) {
+//                    log.error("处理订单异常 " + e);
+//                }
+//            }
+//        }
+//    }
+
+    /*
+
+    下面代码是 不使用 消息队列stream 实现的 ，使用的jvm中的阻塞队列
+
+     */
+
+//    @Override
+//    public Result seckillOrder(Long voucherId) {
+//        Long userid = UserHolder.getUser().getId();
+//        String userID = userid.toString();
+//        /*
+//        在 Lua 脚本中返回的数字值（如 0 或 1）在 Java 中通常会被映射为 Long 类型。这是因为 Lua 中的数字默认是双精度浮点数（double），
+//        但在 Java 中，尤其是通过一些常见的 Lua 与 Java 的桥接库（如 LuaJ），Lua 的数字值通常会被转换为 Long 类型。
+//         */
+//        // 执行lua 脚本
+//        Long execute = stringRedisTemplate.execute(SECKILL_SCRIPT, Collections.emptyList(), voucherId.toString(), userID);
+//        int r = execute.intValue();
+//        if (execute != 0) {
+//            System.out.println(execute == 1 ? "库存不足" : "不能重复下单");
+//            return Result.fail(execute == 1 ? "库存不足" : "不能重复下单");
+//        }
+//
+//        long orderID = redisIdWorker.nextID(SECKILL_ORDER_ID + voucherId);
+//
+//        // todo 保存阻塞队列
+//        VoucherOrder voucherOrder = new VoucherOrder();
+//        voucherOrder.setVoucherId(voucherId);
+//        voucherOrder.setUserId(userid);
+//        voucherOrder.setId(orderID);
+//
+//
+//        orderTasks.add(voucherOrder); //  封装好订单信息后，放入阻塞队列
+//
+//        proxy = (IVoucherOrderService) AopContext.currentProxy();
+//
+//        return Result.ok(orderID);
+//    }
+
+
 //        SeckillVoucher voucher = iSeckillVoucherService.getById(voucherId);
 //        if (voucher.getBeginTime().isAfter(LocalDateTime.now())) {
 //            return Result.fail("秒杀尚未开始");
@@ -215,36 +366,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 //            lock.unlock();
 //        }
 //    }
-
-
-    @Transactional
-    public void createVoucherOrder(VoucherOrder voucherOrder) {
-        // 一人一单 // 这里还是会存在高并发存在的问题
-        Long voucherId = voucherOrder.getVoucherId();
-        Long userId = voucherOrder.getUserId();
-
-        Integer count = query().eq("user_id", userId).eq("voucher_id", voucherId).count();
-        /*
-        为什么 query() 查的是 VoucherOrder 表？
-        继承了 ServiceImpl：你的 VoucherOrderServiceImpl 类继承了 ServiceImpl<VoucherOrderMapper, VoucherOrder>，
-        其中 VoucherOrderMapper 是与 VoucherOrder 表进行映射的 MyBatis 映射器，VoucherOrder 是与数据库表 voucher_order 对应的实体类。
-        因此，当你在 VoucherOrderServiceImpl 中调用 query() 时，实际上是针对 voucher_order 表进行操作的。
-         */
-
-        // 扣减库存
-        boolean success = iSeckillVoucherService.update()
-                .setSql("stock = stock - 1")
-                .gt("stock", 0) // cas 乐观锁
-                .eq("voucher_id", voucherId).update();// eq == where 条件
-
-        if (!success) {
-            log.error("库存不足");
-        }
-
-        save(voucherOrder);
-
-        // 在这里的时候锁就释放了 其他线程就可以进入了 ，所以这里还是会存在 线程安全问题
-    }
 
 //    @Transactional
 //    public Result createVoucherOrder(Long voucherId, Long userId) {

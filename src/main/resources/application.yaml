@@ -5,7 +5,7 @@ spring:
     name: hmdp
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/hmdianping?useSSL=false&serverTimezone=UTC
+    url: jdbc:mysql://127.0.0.1:3306/hmdianping?useSSL=false&serverTimezone=UTC&useSSL=false&allowPublicKeyRetrieval=true
     username: duhaixing
     password: dhx0119DHX
   redis:
@@ -19,8 +19,14 @@ spring:
         time-between-eviction-runs: 10s
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 20MB
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:
   level:
     com.hmdp: debug
+

@@ -49,6 +49,12 @@ class HmDianPingApplicationTests {
         System.out.println(l);
     }
 
+    @Test
+    void currentUser(){
+        System.out.println("当前运行用户：" + System.getProperty("user.name"));
+
+    }
+
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 

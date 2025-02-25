@@ -40,6 +40,8 @@ spring:
           max-attempts: 3
     virtual-host: /hmdianping
     connection-timeout: 1s
+    publisher-confirm-type: none # 开启confirm机制，用来告诉生产者  交换机是否收到了消息
+    publisher-returns: false # 开启return机制 路由失败问题
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:

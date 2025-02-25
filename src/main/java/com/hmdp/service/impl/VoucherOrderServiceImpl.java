@@ -24,6 +24,7 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.util.Collections;
 import java.util.concurrent.*;
@@ -55,8 +56,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private VoucherController voucherController;
 
 
-
-
     private final BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024); // 阻塞队列：当一个线程尝试从这个队列中获取元素的时候，如果没有元素就会阻塞
 
     private final ExecutorService SEKILL_ORDER_EXCUTOR = Executors.newSingleThreadExecutor();
@@ -65,10 +64,40 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Autowired
     private RabbitTemplate rabbitTemplate;
 
-//    @PostConstruct //  这个注解的作用是 创建类的时候自动 执行这个方法
-//    private void init() {
-//        SEKILL_ORDER_EXCUTOR.submit(new VoucherOrderHandler());
-//    }
+    @Resource
+    private ObjectMapper objectMapper;
+
+
+    // todo:这部分应该另起一个线程来执行
+    @RabbitListener(queues = RabbitMQConstants.SECKILL_QUEUE, concurrency = "1")
+    // 使用消息队列监听 // 注意此注解的执行顺序貌似在 注入redisconfig之前 所以redisconfig出现为null的情况
+    public void handleVoucherOrder(VoucherOrder voucherOrder) {
+        SEKILL_ORDER_EXCUTOR.submit(() -> processVoucherOrder(voucherOrder));
+    }
+    private void processVoucherOrder(VoucherOrder voucherOrder){
+        RedisConfig redisConfig = new RedisConfig();
+
+        // 获取用户信息 因为是多线程了 不能从UserHolder中取了
+        Long userId = voucherOrder.getUserId();
+
+        RLock lock = redisConfig.redissonClient().getLock("redission:lock:order:" + userId); // 这里返回的是一个RedissonLock 类
+
+        boolean isLock = lock.tryLock();
+
+        if (!isLock) {
+            log.warn("不允许重复下单");
+            return;
+        }
+
+        try {
+//            proxy.createVoucherOrder(voucherOrder); // 同样的id 来的话 只能让一个人得到锁 其余相同的id的会被锁在外面不允许进来，防止黄牛
+            createVoucherOrder(voucherOrder);
+        } catch (Exception e) {
+            log.error("处理 RabbitMQ 消息失败: {}", voucherOrder, e);
+        } finally {
+            lock.unlock();
+        }
+    }
 
 //    private class VoucherOrderHandler implements Runnable {
 //        String queueName = "streams.orders";
@@ -144,40 +173,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 //        }
 //    }
 
-    @Resource
-    private ObjectMapper objectMapper;
-
-
-
-    // 这部分应该另起一个线程来执行
-    @RabbitListener(queues = RabbitMQConstants.SECKILL_QUEUE) // 使用消息队列监听 // 注意此注解的执行顺序貌似在 注入redisconfig之前 所以redisconfig出现为null的情况
-    private void handleVoucherOrder(VoucherOrder voucherOrder)  {
-
-        RedisConfig redisConfig = new RedisConfig();
-//        VoucherOrder voucherOrder = objectMapper.readValue(msg, VoucherOrder.class);
-
-        // 获取用户信息 因为是多线程了 不能从UserHolder中取了
-        Long userId = voucherOrder.getUserId();
-
-        RLock lock = redisConfig.redissonClient().getLock("redission:lock:order:" + userId); // 这里返回的是一个RedissonLock 类
-
-        boolean isLock = lock.tryLock();
-
-        if (!isLock) {
-            log.warn("不允许重复下单");
-            return;
-        }
-
-        try {
-//            proxy.createVoucherOrder(voucherOrder); // 同样的id 来的话 只能让一个人得到锁 其余相同的id的会被锁在外面不允许进来，防止黄牛
-            createVoucherOrder(voucherOrder);
-        } catch (Exception e) {
-            log.error("处理 RabbitMQ 消息失败: {}", voucherOrder, e);
-        } finally {
-            lock.unlock();
-        }
-    }
-
 
     private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
 
@@ -217,7 +212,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         voucherOrder.setVoucherId(voucherId);
         voucherOrder.setUserId(userid);
         // 将封装好的voucherOrder 发送到rabbitmq 中去 同时要改变序列化格式 不要用jdk默认的序列化格式
-        rabbitTemplate.convertAndSend(RabbitMQConstants.SECKILL_EXCHANGE,RabbitMQConstants.SECKILL_ROUTING_KEY,voucherOrder);
+        rabbitTemplate.convertAndSend(RabbitMQConstants.SECKILL_EXCHANGE, RabbitMQConstants.SECKILL_ROUTING_KEY, voucherOrder);
 
 //        proxy = (IVoucherOrderService) AopContext.currentProxy();
 

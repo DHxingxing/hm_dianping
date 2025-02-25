@@ -50,7 +50,6 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     private StringRedisTemplate stringRedisTemplate;
     @Autowired
     private CacheClient cacheClient;
-
     @Resource
     private IShopService shopService;
 

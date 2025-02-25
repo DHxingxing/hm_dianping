@@ -24,9 +24,27 @@ spring:
       enabled: true
       max-file-size: 10MB
       max-request-size: 20MB
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: hmdianping
+    password: 123456
+    listener:
+      simple:
+        prefetch: 1
+      direct:
+        retry: # 生产者重连的配置
+          enabled: true
+          initial-interval: 1000ms
+          multiplier: 1
+          max-attempts: 3
+    virtual-host: /hmdianping
+    connection-timeout: 1s
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:
   level:
     com.hmdp: debug
+
+
 

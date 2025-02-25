@@ -17,6 +17,7 @@ public class RedisConstant {
     public static final String BLOG_LIKED = "blog:liked:";
     public static final String FOLLOWS = "follows:";
     public static final String SECKILL_ORDER_ID= "secKill:order:";
+    public static final String USER_SIGN_KEY = "sign:";
 
 
 
